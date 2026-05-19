@@ -1,54 +1,71 @@
 /* ===================================================
-   TermoDepozit — Calculator kW + estimare costuri
+   TermoDepozit — Calculator kW + costuri + grafic lunar
    =================================================== */
 
-/* ===== TARIFE (lei) ===== */
+/* ===== TARIFE ACTUALE MD ===== */
 const TARIFF = {
-    electric_centru_sud: 3.56,  // Premier Energy
-    electric_nord:       3.95,  // FEE Nord
-    gaz_m3:              14.42, // lei/m³
-    lemn_ster:           1000,  // lei/m³ ster (medie)
+    electricNord:  3.95,   // FEE Nord (lei/kWh)
+    electricSud:   3.56,   // Premier Energy centru & sud (lei/kWh)
+    gaz:           14.42,  // lei/m³ cu TVA
+    lemn:          1000,   // lei/m³ster (medie lemn tare)
 };
+
+/* ===== ORE ECHIVALENT SEZON COMPLET (full-load hours) =====
+   Bazat pe HDD/CDD Moldova și temperatura de calcul:
+   Nord (Bălți):    iarnă -24°C, vară +28°C
+   Centru (Chișinău): iarnă -22°C, vară +30°C
+   Sud (Causeni):   iarnă -20°C, vară +33°C  */
+const HEAT_HOURS = { nord: 1900, centru: 1750, sud: 1580 };
+const COOL_HOURS = { nord: 550,  centru: 680,  sud: 860  };
+
+/* ===== DISTRIBUȚIE LUNARĂ (% din total anual)
+   Calculat din grad-zile reale ale Republicii Moldova ===== */
+const MONTHLY_HEAT_PCT = {
+    nord:   [24, 21, 16,  7,  1,  0,  0,  0,  1,  7, 12, 11],
+    centru: [22, 19, 15,  7,  1,  0,  0,  0,  1,  8, 14, 13],
+    sud:    [21, 18, 14,  8,  2,  0,  0,  0,  2,  9, 14, 12],
+};
+const MONTHLY_COOL_PCT = {
+    nord:   [ 0,  0,  0,  0,  1, 16, 42, 30,  9,  2,  0,  0],
+    centru: [ 0,  0,  0,  0,  2, 18, 40, 30,  8,  2,  0,  0],
+    sud:    [ 0,  0,  0,  0,  3, 17, 37, 32,  9,  2,  0,  0],
+};
+
+const MONTHS_RO = ['Ian','Feb','Mar','Apr','Mai','Iun','Iul','Aug','Sep','Oct','Nov','Dec'];
+
+let chartInstance = null;
 
 /* ===== STATE ===== */
 const state = {
-    serviciu:  null,          // 'incalzire' | 'racire' | 'ambele'
-    tip:       null,          // 'apartament' | 'casa'
-    etaj:      'mijloc',      // 'mijloc' | 'extrem'
-    etaje:     '1',           // '1' | '2' | '3'
-    area:      null,
-    izolatie:  null,          // 'slaba' | 'medie' | 'buna'
-    expunere:  null,          // 'scazuta' | 'medie' | 'ridicata'
-    zona:      null,          // 'nord' | 'centru' | 'sud'
-    category:  null,
-    kwHeat:    null,
-    kwCool:    null,
+    serviciu: null, tip: null, etaj: 'mijloc', etaje: '1',
+    area: null, izolatie: null, expunere: null, zona: null,
+    category: null, kwHeat: null, kwCool: null,
+    annualHeatKwh: 0, annualCoolKwh: 0,
 };
 
-/* ===== HEADER — hamburger + scroll shadow ===== */
+/* ===== HEADER ===== */
 function toggleMenu() {
     document.getElementById('nav').classList.toggle('open');
     document.getElementById('hamburger').classList.toggle('open');
 }
-document.querySelectorAll('.nav a').forEach(a => {
+document.querySelectorAll('.nav a').forEach(a =>
     a.addEventListener('click', () => {
         document.getElementById('nav').classList.remove('open');
         document.getElementById('hamburger').classList.remove('open');
-    });
-});
+    })
+);
 window.addEventListener('scroll', () => {
     document.getElementById('header').style.boxShadow =
         window.scrollY > 10 ? '0 2px 20px rgba(0,0,0,.1)' : 'none';
 });
 
-/* ===== STEP MANAGEMENT ===== */
+/* ===== STEP NAVIGATION ===== */
 const STEP_PROGRESS = { step1: 16.6, step2: 33, step3: 50, step4: 66, step5: 83, step6: 100, stepResult: 100 };
 const STEP_INDEX    = { step1: 1, step2: 2, step3: 3, step4: 4, step5: 5, step6: 6 };
 
 function showStep(id) {
     document.querySelectorAll('.c-step').forEach(el => el.classList.remove('active'));
-    const el = document.getElementById(id);
-    if (el) el.classList.add('active');
+    document.getElementById(id)?.classList.add('active');
 
     document.getElementById('cpFill').style.width = (STEP_PROGRESS[id] || 16) + '%';
 
@@ -60,47 +77,38 @@ function showStep(id) {
         if (i < cur)  dot.classList.add('done');
         if (i === cur) dot.classList.add('active');
     }
-
     document.getElementById('calculator').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function goStep(from, to) {
-    const id = (to === 'r') ? 'stepResult' : 'step' + to;
-    showStep(id);
+    showStep(to === 'r' ? 'stepResult' : 'step' + to);
 }
 
-/* ===== CATEGORY CARDS → open calculator ===== */
 function goToCalcWithCategory(cat) {
     state.category = cat;
     document.getElementById('calculator').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/* ===== CHOICE BUTTONS ===== */
+/* ===== CHOICE CONTROLS ===== */
 function pick(btn) {
-    const field = btn.dataset.field;
-    const value = btn.dataset.value;
+    const { field, value } = btn.dataset;
     state[field] = value;
 
-    btn.closest('.choice-grid').querySelectorAll('.choice-btn[data-field="' + field + '"]')
+    btn.closest('.choice-grid').querySelectorAll(`.choice-btn[data-field="${field}"]`)
        .forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
 
-    /* sub-questions for step 2 */
     if (field === 'tip') {
-        const sqA = document.getElementById('sqApart');
-        const sqH = document.getElementById('sqHouse');
-        if (sqA) sqA.style.display = value === 'apartament' ? 'block' : 'none';
-        if (sqH) sqH.style.display = value === 'casa'       ? 'block' : 'none';
+        document.getElementById('sqApart').style.display = value === 'apartament' ? 'block' : 'none';
+        document.getElementById('sqHouse').style.display = value === 'casa'       ? 'block' : 'none';
     }
-
-    const nextMap = { serviciu: 'next1', tip: 'next2', izolatie: 'next4', expunere: 'next5', zona: 'next6' };
-    const nb = nextMap[field];
+    const nxtMap = { serviciu: 'next1', tip: 'next2', izolatie: 'next4', expunere: 'next5', zona: 'next6' };
+    const nb = nxtMap[field];
     if (nb) document.getElementById(nb).disabled = false;
 }
 
 function pickTag(btn) {
-    const field = btn.dataset.field;
-    state[field] = btn.dataset.value;
+    state[btn.dataset.field] = btn.dataset.value;
     btn.closest('.tag-row').querySelectorAll('.tag-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
 }
@@ -108,63 +116,49 @@ function pickTag(btn) {
 /* ===== AREA INPUT ===== */
 function onAreaInput() {
     const val = parseFloat(document.getElementById('areaInp').value);
-    const nb  = document.getElementById('next3');
-    if (nb) nb.disabled = !(val > 0);
+    document.getElementById('next3').disabled = !(val > 0);
     if (val > 0) state.area = val;
 }
 function setArea(v) {
-    const inp = document.getElementById('areaInp');
-    if (inp) { inp.value = v; onAreaInput(); }
+    document.getElementById('areaInp').value = v;
+    onAreaInput();
 }
 
 /* ===== CALCULATE ===== */
 function calculate() {
     const { tip, etaj, etaje, area, izolatie, expunere, zona } = state;
 
-    /* ---- HEATING kW ---- */
+    /* --- Heating W/m² base --- */
     const baseHeat = {
-        apartament: { slaba: 105, medie: 82, buna: 62 },
-        casa:       { slaba: 145, medie: 112, buna: 82 },
+        apartament: { slaba: 108, medie: 85, buna: 64 },
+        casa:       { slaba: 148, medie: 115, buna: 84 },
     };
-    let wHeat = baseHeat[tip][izolatie];
+    let wH = baseHeat[tip][izolatie];
+    wH *= { nord: 1.10, centru: 1.00, sud: 0.90 }[zona];
+    if (tip === 'apartament' && etaj === 'extrem') wH *= 1.15;
+    if (tip === 'casa') wH *= ({ '1': 1.15, '2': 1.00, '3': 0.95 })[etaje];
+    wH *= { scazuta: 1.00, medie: 1.03, ridicata: 1.07 }[expunere];
+    wH *= 1.15; // rezervă 15%
+    const kwHeat = roundHalf((area * wH) / 1000);
 
-    /* climate (heating design temp) */
-    const climHeat = { nord: 1.10, centru: 1.00, sud: 0.90 };
-    wHeat *= climHeat[zona];
-
-    /* floor factor */
-    if (tip === 'apartament' && etaj === 'extrem') wHeat *= 1.15;
-    if (tip === 'casa') wHeat *= ({ '1': 1.15, '2': 1.00, '3': 0.95 })[etaje];
-
-    /* solar adds a small factor to heating need (window losses) */
-    const solarHeat = { scazuta: 1.0, medie: 1.03, ridicata: 1.07 };
-    wHeat *= solarHeat[expunere];
-
-    wHeat *= 1.15; /* safety reserve */
-    let kwHeat = roundHalf((area * wHeat) / 1000);
-
-    /* ---- COOLING kW ---- */
+    /* --- Cooling W/m² base --- */
     const baseCool = {
-        apartament: { slaba: 92, medie: 76, buna: 60 },
-        casa:       { slaba: 100, medie: 82, buna: 66 },
+        apartament: { slaba: 95, medie: 78, buna: 62 },
+        casa:       { slaba: 102, medie: 84, buna: 68 },
     };
-    let wCool = baseCool[tip][izolatie];
+    let wC = baseCool[tip][izolatie];
+    wC *= { nord: 0.88, centru: 1.00, sud: 1.15 }[zona];
+    wC *= { scazuta: 0.80, medie: 1.00, ridicata: 1.28 }[expunere];
+    if (tip === 'apartament' && etaj === 'extrem') wC *= 1.22;
+    if (tip === 'casa' && etaje === '1') wC *= 1.10;
+    wC *= 1.10;
+    const kwCool = roundHalf((area * wC) / 1000);
 
-    const climCool = { nord: 0.88, centru: 1.00, sud: 1.15 };
-    wCool *= climCool[zona];
+    /* Annual energy (kWh) = design_kW × equivalent_full_load_hours */
+    const annualHeatKwh = kwHeat * HEAT_HOURS[zona];
+    const annualCoolKwh = kwCool * COOL_HOURS[zona];
 
-    const solarCool = { scazuta: 0.82, medie: 1.00, ridicata: 1.28 };
-    wCool *= solarCool[expunere];
-
-    /* top floor/last apt adds significant solar load */
-    if (tip === 'apartament' && etaj === 'extrem') wCool *= 1.20;
-    if (tip === 'casa' && etaje === '1') wCool *= 1.10;
-
-    wCool *= 1.10; /* safety reserve */
-    let kwCool = roundHalf((area * wCool) / 1000);
-
-    state.kwHeat = kwHeat;
-    state.kwCool = kwCool;
+    Object.assign(state, { kwHeat, kwCool, annualHeatKwh, annualCoolKwh });
 
     renderResult();
     showStep('stepResult');
@@ -174,233 +168,379 @@ function roundHalf(v) { return Math.ceil(v * 2) / 2; }
 
 /* ===== RENDER RESULT ===== */
 function renderResult() {
-    const { serviciu, tip, etaj, etaje, area, izolatie, expunere, zona, kwHeat, kwCool, category } = state;
+    const { serviciu, tip, etaj, etaje, area, izolatie, expunere, zona,
+            kwHeat, kwCool, annualHeatKwh, annualCoolKwh } = state;
 
-    const needHeat = serviciu === 'incalzire' || serviciu === 'ambele';
-    const needCool = serviciu === 'racire'    || serviciu === 'ambele';
+    const needHeat = serviciu !== 'racire';
+    const needCool = serviciu !== 'incalzire';
 
     /* Summary line */
-    const svcLabel = { incalzire: 'Încălzire', racire: 'Răcire', ambele: 'Încălzire + Răcire' }[serviciu];
+    const svcMap = { incalzire: 'Încălzire', racire: 'Răcire', ambele: 'Încălzire + Răcire' };
     document.getElementById('rcSummaryLine').textContent =
-        `${svcLabel} · ${tip === 'apartament' ? 'Apartament' : 'Casă'} · ${area} m²`;
+        `${svcMap[serviciu]} · ${tip === 'apartament' ? 'Apartament' : 'Casă'} · ${area} m²`;
 
     /* KW blocks */
     const kwRow = document.getElementById('rcKwRow');
     kwRow.className = 'rc-kw-row' + (needHeat && needCool ? ' dual' : '');
+    kwRow.innerHTML = (needHeat ? `
+        <div class="kw-block kw-block-heat">
+          <div class="kw-label">🔥 Încălzire</div>
+          <div class="kw-value"><span class="kw-num" id="kwNumH">0</span><span class="kw-unit">kW</span></div>
+          <div class="kw-sub">putere termică necesară</div>
+        </div>` : '') +
+        (needCool ? `
+        <div class="kw-block kw-block-cool">
+          <div class="kw-label">❄️ Răcire</div>
+          <div class="kw-value"><span class="kw-num" id="kwNumC">0</span><span class="kw-unit">kW</span></div>
+          <div class="kw-sub">putere de răcire necesară</div>
+        </div>` : '');
 
-    let kwHtml = '';
-    if (needHeat) {
-        kwHtml += `
-          <div class="kw-block kw-block-heat">
-            <div class="kw-label">🔥 Încălzire</div>
-            <div class="kw-value">
-              <span class="kw-num" id="kwNumHeat">0</span>
-              <span class="kw-unit">kW</span>
-            </div>
-            <div class="kw-sub">putere termică necesară</div>
-          </div>`;
-    }
-    if (needCool) {
-        kwHtml += `
-          <div class="kw-block kw-block-cool">
-            <div class="kw-label">❄️ Răcire</div>
-            <div class="kw-value">
-              <span class="kw-num" id="kwNumCool">0</span>
-              <span class="kw-unit">kW</span>
-            </div>
-            <div class="kw-sub">putere de răcire necesară</div>
-          </div>`;
-    }
-    kwRow.innerHTML = kwHtml;
-
-    if (needHeat) animNum('kwNumHeat', kwHeat);
-    if (needCool) animNum('kwNumCool', kwCool);
+    if (needHeat) animNum('kwNumH', kwHeat);
+    if (needCool) animNum('kwNumC', kwCool);
 
     /* Tags */
-    const tipLabel  = tip === 'apartament'
+    const izoMap  = { slaba: '🧱 Izolație slabă', medie: '🏗️ Standard', buna: '🌿 Izolație bună' };
+    const solMap  = { scazuta: '🌑 Soare mic', medie: '⛅ Moderat', ridicata: '☀️ Soare mare' };
+    const zonaMap = { nord: '❄️ Nord MD', centru: '🌡️ Centru MD', sud: '☀️ Sud MD' };
+    const tipLabel = tip === 'apartament'
         ? `Apartament${etaj === 'extrem' ? ' (etaj extrem)' : ''}`
         : `Casă (${etaje === '3' ? '3+' : etaje} ${etaje === '1' ? 'etaj' : 'etaje'})`;
-    const izoLabel  = { slaba: '🧱 Izolație slabă', medie: '🏗️ Standard', buna: '🌿 Izolație bună' }[izolatie];
-    const solLabel  = { scazuta: '🌑 Soare mic', medie: '⛅ Soare moderat', ridicata: '☀️ Soare mare' }[expunere];
-    const zonaLabel = { nord: '❄️ Nord MD', centru: '🌡️ Centru MD', sud: '☀️ Sud MD' }[zona];
 
     document.getElementById('rcTags').innerHTML =
         `<span class="rc-tag">${tipLabel}</span>
          <span class="rc-tag">${area} m²</span>
-         <span class="rc-tag">${izoLabel}</span>
-         <span class="rc-tag">${solLabel}</span>
-         <span class="rc-tag">${zonaLabel}</span>`;
+         <span class="rc-tag">${izoMap[izolatie]}</span>
+         <span class="rc-tag">${solMap[expunere]}</span>
+         <span class="rc-tag">${zonaMap[zona]}</span>`;
 
     /* Recommendation */
-    const rec = getRecommendation(kwHeat, kwCool, serviciu, category);
-    document.getElementById('rcRecText').innerHTML = rec;
+    document.getElementById('rcRecText').innerHTML =
+        getRecommendation(kwHeat, kwCool, serviciu, state.category);
 
-    /* Cost estimates */
-    renderCosts(needHeat, needCool, kwHeat, kwCool, zona, area, izolatie);
+    /* Cost breakdown + monthly chart */
+    renderCostBreakdown(needHeat, needCool, annualHeatKwh, annualCoolKwh, zona, kwHeat, kwCool);
 
     /* Pre-fill form message */
     const fMsg = document.getElementById('fMsg');
     if (fMsg && !fMsg.value) {
-        const parts = [];
-        if (needHeat) parts.push(`Încălzire: ${kwHeat} kW`);
-        if (needCool) parts.push(`Răcire: ${kwCool} kW`);
-        fMsg.value = `${tipLabel}, ${area} m², ${izoLabel.replace(/^.+ /,'')} — ${parts.join(', ')}`;
+        const p = [];
+        if (needHeat) p.push(`Încălzire: ${kwHeat} kW`);
+        if (needCool) p.push(`Răcire: ${kwCool} kW`);
+        fMsg.value = `${tipLabel}, ${area} m² — ${p.join(', ')}`;
     }
 }
 
-/* ===== COST ESTIMATES ===== */
-function renderCosts(needHeat, needCool, kwHeat, kwCool, zona, area, izolatie) {
-    /* Tarif electric */
-    const tariffEl = zona === 'nord' ? TARIFF.electric_nord : TARIFF.electric_centru_sud;
+/* ===== COST BREAKDOWN + MONTHLY CHART ===== */
+function renderCostBreakdown(needHeat, needCool, heatKwh, coolKwh, zona, kwHeat, kwCool) {
+    const tariffEl = zona === 'nord' ? TARIFF.electricNord : TARIFF.electricSud;
 
-    /* --- Heating annual energy (kWh) ---
-       Moldova: ~180 zile sezon, ~12h/zi, factor sarcina 0.58 */
-    const heatEnergy = kwHeat * 180 * 12 * 0.58;
-
-    /* --- Cooling annual energy (kWh) ---
-       ~90 zile vară, ~8h/zi, factor 0.65 */
-    const coolEnergy = kwCool * 90 * 8 * 0.65;
-
-    let html = '<div class="cost-section">';
-    html += '<div class="cost-title">Estimare costuri anuale (sezon complet)</div>';
-    html += '<div class="cost-grid' + (needHeat && needCool ? ' dual' : '') + '">';
+    /* Annual costs per system */
+    const costs = {};
 
     if (needHeat) {
-        /* Pompă căldură — SCOP 3.6 */
-        const hpHeat = lei(heatEnergy / 3.6 * tariffEl);
-        /* Cazan gaz — eff 92%, 1 m³ = 10.35 kWh */
-        const gazCost = lei((heatEnergy / (10.35 * 0.92)) * TARIFF.gaz_m3);
-        /* Cazan lemn — 1 m³ster = 1688 kWh util */
-        const lemnCost = lei((heatEnergy / 1688) * TARIFF.lemn_ster);
+        /* Pompă căldură — SCOP sezonier 3.4 */
+        costs.hpHeat  = heatKwh / 3.4 * tariffEl;
+        /* Cazan gaz — eff 93%, 1m³ = 10.35 kWh */
+        costs.gazHeat = heatKwh / (10.35 * 0.93) * TARIFF.gaz;
+        /* Cazan lemn tare — 1 m³ster = 1600 kWh util net */
+        costs.lemnHeat = heatKwh / 1600 * TARIFF.lemn;
+    }
+    if (needCool) {
+        /* Pompă căldură — SEER sezonier 4.5 */
+        costs.hpCool  = coolKwh / 4.5 * tariffEl;
+        /* AC Inverter — SEER 5.0 */
+        costs.acInvCool = coolKwh / 5.0 * tariffEl;
+        /* AC Standard — SEER 3.5 */
+        costs.acStdCool = coolKwh / 3.5 * tariffEl;
+    }
 
+    /* Build HTML */
+    let html = `<div class="cost-wrap">`;
+
+    /* Annual summary cards */
+    html += `<div class="cost-annual">
+        <div class="cost-annual-title">💸 Estimare costuri anuale — sezon complet</div>
+        <div class="cost-annual-grid">`;
+
+    if (needHeat) {
         html += `
-          <div class="cost-block">
-            <div class="cost-block-header cost-block-heat-h">🔥 Încălzire — ${kwHeat} kW</div>
-            <div class="cost-rows">
-              <div class="cost-row">
-                <div class="cost-row-label"><span class="cost-row-icon">♻️</span>Pompă de căldură</div>
-                <div class="cost-row-price">${hpHeat} lei <small>/an</small></div>
+          <div class="cost-sys-card">
+            <div class="cost-sys-header heat-header">🔥 Încălzire · ${kwHeat} kW · ${Math.round(heatKwh).toLocaleString('ro-MD')} kWh/an</div>
+            <div class="cost-sys-rows">
+              <div class="cost-sys-row best-row">
+                <span class="cost-sys-ico">♻️</span>
+                <span class="cost-sys-name">Pompă de căldură <span class="best-tag">Cel mai ieftin</span></span>
+                <span class="cost-sys-val">${fmtLei(costs.hpHeat)} lei/an</span>
               </div>
-              <div class="cost-row">
-                <div class="cost-row-label"><span class="cost-row-icon">🔥</span>Cazan pe gaz</div>
-                <div class="cost-row-price">${gazCost} lei <small>/an</small></div>
+              <div class="cost-sys-row">
+                <span class="cost-sys-ico">🔥</span>
+                <span class="cost-sys-name">Cazan pe gaz</span>
+                <span class="cost-sys-val">${fmtLei(costs.gazHeat)} lei/an</span>
               </div>
-              <div class="cost-row">
-                <div class="cost-row-label"><span class="cost-row-icon">🪵</span>Cazan pe lemn</div>
-                <div class="cost-row-price">${lemnCost} lei <small>/an</small></div>
+              <div class="cost-sys-row">
+                <span class="cost-sys-ico">🪵</span>
+                <span class="cost-sys-name">Cazan pe lemn</span>
+                <span class="cost-sys-val">${fmtLei(costs.lemnHeat)} lei/an</span>
               </div>
             </div>
           </div>`;
     }
 
     if (needCool) {
-        /* Pompă căldură răcire — SEER 4.0 */
-        const hpCool = lei(coolEnergy / 4.0 * tariffEl);
-        /* AC inverter split — SEER 5.0 */
-        const acCool = lei(coolEnergy / 5.0 * tariffEl);
-        /* AC standard — SEER 3.5 */
-        const acStd  = lei(coolEnergy / 3.5 * tariffEl);
-
         html += `
-          <div class="cost-block">
-            <div class="cost-block-header cost-block-cool-h">❄️ Răcire — ${kwCool} kW</div>
-            <div class="cost-rows">
-              <div class="cost-row">
-                <div class="cost-row-label"><span class="cost-row-icon">♻️</span>Pompă de căldură</div>
-                <div class="cost-row-price">${hpCool} lei <small>/an</small></div>
+          <div class="cost-sys-card">
+            <div class="cost-sys-header cool-header">❄️ Răcire · ${kwCool} kW · ${Math.round(coolKwh).toLocaleString('ro-MD')} kWh/an</div>
+            <div class="cost-sys-rows">
+              <div class="cost-sys-row best-row">
+                <span class="cost-sys-ico">♻️</span>
+                <span class="cost-sys-name">Pompă de căldură <span class="best-tag">Cel mai ieftin</span></span>
+                <span class="cost-sys-val">${fmtLei(costs.hpCool)} lei/an</span>
               </div>
-              <div class="cost-row">
-                <div class="cost-row-label"><span class="cost-row-icon">❄️</span>AC Inverter</div>
-                <div class="cost-row-price">${acCool} lei <small>/an</small></div>
+              <div class="cost-sys-row">
+                <span class="cost-sys-ico">❄️</span>
+                <span class="cost-sys-name">AC Inverter</span>
+                <span class="cost-sys-val">${fmtLei(costs.acInvCool)} lei/an</span>
               </div>
-              <div class="cost-row">
-                <div class="cost-row-label"><span class="cost-row-icon">🌀</span>AC Standard</div>
-                <div class="cost-row-price">${acStd} lei <small>/an</small></div>
+              <div class="cost-sys-row">
+                <span class="cost-sys-ico">🌀</span>
+                <span class="cost-sys-name">AC Standard</span>
+                <span class="cost-sys-val">${fmtLei(costs.acStdCool)} lei/an</span>
               </div>
             </div>
           </div>`;
     }
 
-    html += '</div>';
-    html += `<p class="cost-note">* Estimare orientativă bazată pe prețurile actuale: curent ${tariffEl} lei/kWh (${zona === 'nord' ? 'FEE Nord' : 'Premier Energy'}), gaz 14,42 lei/m³, lemn tare ~1.000 lei/m³ster.<br>Costurile reale variază în funcție de comportamentul utilizatorilor și condițiile climatice.</p>`;
-    html += '</div>';
+    html += `</div>`; // cost-annual-grid
 
-    /* Insert before offer form */
-    const offerForm = document.getElementById('offerForm');
-    let existingCost = document.getElementById('costEstimates');
-    if (existingCost) existingCost.remove();
+    /* Tariff note */
+    const tariffLabel = zona === 'nord' ? 'FEE Nord — 3,95 lei/kWh' : 'Premier Energy — 3,56 lei/kWh';
+    html += `<p class="cost-note">Curent electric: ${tariffLabel} · Gaz: 14,42 lei/m³ · Lemn tare: ~1.000 lei/m³ster<br>Estimare bazată pe condiții climatice medii ale Republicii Moldova. Costurile reale pot varia ±15%.</p>`;
+    html += `</div>`; // cost-annual
 
-    const costDiv = document.createElement('div');
-    costDiv.id = 'costEstimates';
-    costDiv.innerHTML = html;
-    offerForm.parentNode.insertBefore(costDiv, offerForm);
+    /* Monthly chart */
+    html += `<div class="monthly-wrap">
+        <div class="monthly-header">
+            <div class="monthly-title">📅 Distribuție lunară a costurilor (lei)</div>
+            <div class="monthly-legend" id="chartLegend"></div>
+        </div>
+        <div class="chart-container">
+            <canvas id="monthlyChart"></canvas>
+        </div>
+        <div class="monthly-selector" id="monthlySelector"></div>
+    </div>`;
+
+    html += `</div>`; // cost-wrap
+
+    const container = document.getElementById('costBreakdown');
+    container.innerHTML = html;
+
+    /* Build monthly chart datasets */
+    buildChart(needHeat, needCool, costs, zona, kwHeat, kwCool);
 }
 
-function lei(v) {
-    return Math.round(v).toLocaleString('ro-MD');
+/* ===== CHART ===== */
+function buildChart(needHeat, needCool, costs, zona, kwHeat, kwCool) {
+    const tariffEl = zona === 'nord' ? TARIFF.electricNord : TARIFF.electricSud;
+
+    /* System selector buttons */
+    const selWrap = document.getElementById('monthlySelector');
+    const systems = [];
+    if (needHeat) {
+        systems.push({ id: 'hp',   label: '♻️ Pompă căldură', type: 'both' });
+        systems.push({ id: 'gaz',  label: '🔥 Cazan gaz',     type: 'heat' });
+        systems.push({ id: 'lemn', label: '🪵 Cazan lemn',     type: 'heat' });
+    }
+    if (needCool && !needHeat) {
+        systems.push({ id: 'hp_c',  label: '♻️ Pompă căldură', type: 'cool' });
+        systems.push({ id: 'ac_i',  label: '❄️ AC Inverter',   type: 'cool' });
+        systems.push({ id: 'ac_s',  label: '🌀 AC Standard',   type: 'cool' });
+    }
+
+    let activeSystem = systems[0]?.id || 'hp';
+
+    const heatMonthly = MONTHLY_HEAT_PCT[zona].map(p => p / 100);
+    const coolMonthly = MONTHLY_COOL_PCT[zona].map(p => p / 100);
+
+    function getDatasets(sysId) {
+        const ds = [];
+
+        /* Heat dataset */
+        if (needHeat) {
+            let annualH = 0;
+            if (sysId === 'hp')   annualH = costs.hpHeat;
+            if (sysId === 'gaz')  annualH = costs.gazHeat;
+            if (sysId === 'lemn') annualH = costs.lemnHeat;
+            if (annualH > 0) {
+                ds.push({
+                    label: '🔥 Încălzire',
+                    data: heatMonthly.map(p => Math.round(p * annualH)),
+                    backgroundColor: 'rgba(255, 107, 53, 0.85)',
+                    borderColor: '#FF6B35',
+                    borderWidth: 0,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                });
+            }
+        }
+
+        /* Cool dataset */
+        if (needCool) {
+            let annualC = 0;
+            if (sysId === 'hp' || sysId === 'hp_c') annualC = costs.hpCool;
+            if (sysId === 'ac_i') annualC = costs.acInvCool;
+            if (sysId === 'ac_s') annualC = costs.acStdCool;
+            if (annualC > 0) {
+                ds.push({
+                    label: '❄️ Răcire',
+                    data: coolMonthly.map(p => Math.round(p * annualC)),
+                    backgroundColor: 'rgba(11, 197, 234, 0.80)',
+                    borderColor: '#0BC5EA',
+                    borderWidth: 0,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                });
+            }
+        }
+        return ds;
+    }
+
+    function renderLegend(sysId) {
+        const name = systems.find(s => s.id === sysId)?.label || '';
+        let html = `<span class="legend-title">${name}</span>`;
+        if (needHeat) html += `<span class="leg-dot" style="background:#FF6B35"></span><span>Încălzire</span>`;
+        if (needCool) html += `<span class="leg-dot" style="background:#0BC5EA"></span><span>Răcire</span>`;
+        document.getElementById('chartLegend').innerHTML = html;
+    }
+
+    /* Selector buttons */
+    selWrap.innerHTML = systems.map(s =>
+        `<button class="sys-btn${s.id === activeSystem ? ' active' : ''}" onclick="switchChart('${s.id}')">${s.label}</button>`
+    ).join('');
+
+    /* Make switchChart global */
+    window.switchChart = (sysId) => {
+        activeSystem = sysId;
+        selWrap.querySelectorAll('.sys-btn').forEach(b => {
+            b.classList.toggle('active', b.textContent.trim() === systems.find(s => s.id === sysId).label.trim());
+        });
+        /* easier: re-query by onclick */
+        selWrap.querySelectorAll('.sys-btn').forEach(b => {
+            const match = b.getAttribute('onclick')?.includes(`'${sysId}'`);
+            b.classList.toggle('active', !!match);
+        });
+        if (chartInstance) {
+            chartInstance.data.datasets = getDatasets(sysId);
+            chartInstance.update('active');
+        }
+        renderLegend(sysId);
+    };
+
+    /* Destroy old chart if exists */
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+    const ctx = document.getElementById('monthlyChart').getContext('2d');
+    chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: MONTHS_RO,
+            datasets: getDatasets(activeSystem),
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#1A202C',
+                    titleColor: '#fff',
+                    bodyColor: 'rgba(255,255,255,.8)',
+                    padding: 12,
+                    cornerRadius: 10,
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ro-MD')} lei`,
+                        footer: items => {
+                            const total = items.reduce((s, i) => s + i.parsed.y, 0);
+                            return total > 0 ? `Total: ${total.toLocaleString('ro-MD')} lei` : '';
+                        },
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    ticks: { font: { size: 12, weight: '600' }, color: '#4A5568' },
+                },
+                y: {
+                    stacked: true,
+                    grid: { color: 'rgba(0,0,0,.06)', lineWidth: 1 },
+                    border: { dash: [4, 4] },
+                    ticks: {
+                        font: { size: 11 }, color: '#718096',
+                        callback: v => v.toLocaleString('ro-MD') + ' lei',
+                    },
+                },
+            },
+        },
+    });
+
+    renderLegend(activeSystem);
 }
 
 /* ===== RECOMMENDATION ===== */
 function getRecommendation(kwHeat, kwCool, serviciu, pref) {
-    const needHeat = serviciu === 'incalzire' || serviciu === 'ambele';
-    const needCool = serviciu === 'racire'    || serviciu === 'ambele';
-    const both     = needHeat && needCool;
+    const needHeat = serviciu !== 'racire';
+    const needCool = serviciu !== 'incalzire';
 
-    /* Both = always push heat pump */
-    if (both) {
-        if (kwHeat <= 16)
-            return '<strong>Pompă de căldură aer-apă 12–16 kW</strong> — soluția ideală pentru ambele nevoi dintr-un singur sistem. Economii 60–70% față de gaz și răcire completă vara. COP 3.5–4.5.';
-        if (kwHeat <= 28)
-            return '<strong>Pompă de căldură aer-apă 18–24 kW</strong> — un singur sistem pentru iarnă și vară. Investiție rentabilă în 4–6 ani față de gaz + AC separat.';
-        return '<strong>Pompă de căldură aer-apă 25–35 kW sau sistem VRF</strong> — pentru suprafețe mari, acoperă întreaga nevoie de încălzire și răcire cu eficiență ridicată.';
+    if (needHeat && needCool) {
+        const kw = kwHeat;
+        if (kw <= 14) return `<strong>Pompă de căldură aer-apă 12–14 kW</strong> — un singur sistem pentru iarnă și vară. COP 3.5–4.5, economii 60–70% față de gaz. Include răcire completă vara.`;
+        if (kw <= 26) return `<strong>Pompă de căldură aer-apă 18–24 kW</strong> — soluție completă încălzire + răcire. Investiția se amortizează în 4–6 ani față de gaz + AC separat.`;
+        return `<strong>Pompă de căldură aer-apă 25–35 kW</strong> sau <strong>sistem VRF</strong> — acoperă integral ambele nevoi cu eficiență ridicată.`;
     }
 
-    if (needHeat && !needCool) {
+    if (needHeat) {
+        const k = kwHeat;
         if (pref === 'gaz') {
-            if (kwHeat <= 14) return `<strong>Cazan pe gaz condensat 18–24 kW</strong> — eficiență >96%, consum redus, ideal pentru apartamente și case mici. Reglaj automat inclus.`;
-            if (kwHeat <= 28) return `<strong>Cazan pe gaz condensat 24–35 kW</strong> — performanță excelentă pentru case medii. Recomandăm modele cu control WiFi.`;
-            return `<strong>Cazan pe gaz 35–70 kW</strong> — putere mare, control precis, potrivit pentru suprafețe extinse sau clădiri.`;
+            if (k <= 14) return `<strong>Cazan gaz condensat 18–24 kW</strong> — eficiență &gt;96%, cost redus lunar.`;
+            if (k <= 30) return `<strong>Cazan gaz condensat 24–35 kW</strong> — recomandat modele Viessmann sau Bosch cu control WiFi.`;
+            return `<strong>Cazan gaz 35–70 kW</strong> — puere mare pentru suprafețe extinse.`;
         }
         if (pref === 'lemn') {
-            if (kwHeat <= 20) return `<strong>Cazan pe lemn cu gazeificare 20–25 kW</strong> — combustibil accesibil, randament ridicat, autonomie excelentă.`;
-            if (kwHeat <= 40) return `<strong>Cazan pe lemn-cărbune 25–45 kW</strong> — flexibil, acceptă combustibili multipli, potrivit pentru case mari.`;
-            return `<strong>Cazan pe lemn-cărbune 50–100+ kW</strong> — pentru suprafețe foarte mari. Recomandăm consultație tehnică gratuită.`;
+            if (k <= 20) return `<strong>Cazan pe lemn gazeificare 20–25 kW</strong> — randament ridicat, autonomie bună.`;
+            if (k <= 40) return `<strong>Cazan lemn-cărbune 25–45 kW</strong> — flexibil, combustibili multipli.`;
+            return `<strong>Cazan lemn-cărbune 50–100+ kW</strong> — pentru suprafețe mari, solicită consultație gratuită.`;
         }
-        if (pref === 'pompa') {
-            return `<strong>Pompă de căldură aer-apă ${kwHeat} kW</strong> — cea mai eficientă soluție de încălzire. COP 3.5–4.5, economii 60–70% față de gaz. Include și funcție de răcire vară.`;
-        }
-        if (pref === 'podea') {
-            return `<strong>Sistem podea caldă hidraulic sau electric</strong> — distribuție uniformă a căldurii, confort maxim. Compatibil cu orice cazan sau pompă de căldură.`;
-        }
-        /* auto */
-        if (kwHeat <= 15) return `<strong>Cazan pe gaz condensat 18–24 kW</strong> sau <strong>pompă de căldură 12–14 kW</strong> — ambele opțiuni excelente pentru suprafața ta.`;
-        if (kwHeat <= 30) return `<strong>Cazan pe gaz condensat 24–35 kW</strong> sau <strong>pompă de căldură 18–24 kW</strong> — recomandat pompa pentru economii pe termen lung.`;
-        return `<strong>Cazan pe gaz 35+ kW</strong>, <strong>cazan pe lemn-cărbune</strong> sau <strong>pompă de căldură industrială</strong> — solicită consultație tehnică gratuită.`;
+        if (pref === 'pompa') return `<strong>Pompă de căldură aer-apă ${k} kW</strong> — cea mai eficientă soluție. COP 3.5+, include răcire vara.`;
+        if (k <= 12) return `<strong>Pompă de căldură 10–12 kW</strong> sau <strong>cazan gaz 18–24 kW</strong>.`;
+        if (k <= 25) return `<strong>Pompă de căldură 18–24 kW</strong> sau <strong>cazan gaz 24–32 kW</strong>. Pompa recomandat pentru economii pe termen lung.`;
+        return `<strong>Cazan gaz 32+ kW</strong> sau <strong>cazan lemn-cărbune</strong> — solicită consultație gratuită.`;
     }
 
-    if (!needHeat && needCool) {
+    if (needCool) {
+        const k = kwCool;
         if (pref === 'ac') {
-            if (kwCool <= 7)  return `<strong>Split AC inverter 7–9 kW</strong> (1–2 unități interioare) — răcire rapidă, consum redus, control WiFi. SEER 5.0+.`;
-            if (kwCool <= 14) return `<strong>Multi-split 3–4 unități, 12–14 kW total</strong> — fiecare cameră principală cu unitate proprie, control independent.`;
-            return `<strong>Sistem VRF/VRV sau multi-split central</strong> — pentru suprafețe mari, control pe zone, eficiență maximă.`;
+            if (k <= 7)  return `<strong>AC inverter split 7–9 kW</strong> (1–2 unități) — SEER 5+, control WiFi.`;
+            if (k <= 14) return `<strong>Multi-split 12–14 kW</strong> — 3–4 unități interioare, control independent pe camere.`;
+            return `<strong>Sistem VRF/VRV 15–30 kW</strong> — eficiență maximă pentru suprafețe mari.`;
         }
-        if (kwCool <= 7)  return `<strong>AC inverter split 7–9 kW</strong> sau <strong>pompă de căldură aer-aer 8–10 kW</strong> — pompă recomandată dacă vrei și puțin ajutor la încălzire.`;
-        if (kwCool <= 14) return `<strong>Multi-split 12–16 kW</strong> sau <strong>pompă de căldură aer-apă</strong> — soluție completă pentru vară și economii semnificative.`;
-        return `<strong>Sistem VRF 15–30 kW</strong> sau <strong>pompă de căldură centrală</strong> — soluție industrială pentru suprafețe mari.`;
+        if (k <= 7)  return `<strong>AC inverter split 7–9 kW</strong> sau <strong>pompă de căldură aer-aer 8 kW</strong>.`;
+        if (k <= 14) return `<strong>Multi-split 12–16 kW</strong> sau <strong>pompă de căldură aer-apă</strong> — include și căldură iarna.`;
+        return `<strong>Sistem VRF 15–30 kW</strong> — pentru suprafețe mari. Solicită consultație gratuită.`;
     }
 
-    return 'Solicită o consultație gratuită — echipa noastră îți recomandă soluția optimă pentru locuința ta.';
+    return 'Solicită o consultație gratuită — echipa noastră îți recomandă soluția optimă.';
 }
 
-/* ===== NUMBER ANIMATION ===== */
+/* ===== HELPERS ===== */
+function fmtLei(v) { return Math.round(v).toLocaleString('ro-MD'); }
 function animNum(id, target) {
     const el = document.getElementById(id);
     if (!el) return;
     let v = 0;
-    const steps = 40;
-    const inc = target / steps;
     const timer = setInterval(() => {
-        v = Math.min(v + inc, target);
+        v = Math.min(v + target / 40, target);
         el.textContent = v >= target ? target : v.toFixed(1);
         if (v >= target) clearInterval(timer);
     }, 18);
@@ -411,67 +551,49 @@ async function submitForm(e) {
     e.preventDefault();
     const name  = document.getElementById('fName').value.trim();
     const phone = document.getElementById('fPhone').value.trim();
-    if (!name || !phone) {
-        alert('Te rugăm completează cel puțin numele și numărul de telefon.');
-        return;
-    }
+    if (!name || !phone) { alert('Te rugăm completează numele și telefonul.'); return; }
 
-    const { serviciu, tip, etaj, etaje, area, izolatie, expunere, zona, kwHeat, kwCool } = state;
+    const { serviciu, tip, area, izolatie, expunere, zona, kwHeat, kwCool } = state;
     const payload = {
-        name,
-        phone,
-        email:    document.getElementById('fEmail').value.trim(),
-        city:     document.getElementById('fCity').value.trim(),
-        message:  document.getElementById('fMsg').value.trim(),
-        calc: {
-            serviciu, tip, area: area + ' m²',
-            izolatie, expunere, zona,
-            kwHeat: kwHeat ? kwHeat + ' kW' : '-',
-            kwCool: kwCool ? kwCool + ' kW' : '-',
-        },
-        sentAt: new Date().toLocaleString('ro-MD'),
+        name, phone,
+        email:   document.getElementById('fEmail').value.trim(),
+        city:    document.getElementById('fCity').value.trim(),
+        message: document.getElementById('fMsg').value.trim(),
+        calc:    { serviciu, tip, area: area + ' m²', izolatie, expunere, zona,
+                   kwHeat: kwHeat + ' kW', kwCool: kwCool + ' kW' },
+        sentAt:  new Date().toLocaleString('ro-MD'),
     };
 
-    /* === TELEGRAM BOT (activează când ești gata) ===
+    /* === TELEGRAM BOT (completează și decomentează) ===
     const BOT_TOKEN = 'YOUR_BOT_TOKEN';
-    const CHAT_ID   = 'YOUR_CHAT_ID_OR_GROUP_ID';
-
-    const serviciiLabel = { incalzire: '🔥 Doar Încălzire', racire: '❄️ Doar Răcire', ambele: '🔥❄️ Încălzire + Răcire' };
+    const CHAT_ID   = 'YOUR_CHAT_ID';
+    const svcLabel  = { incalzire: '🔥 Încălzire', racire: '❄️ Răcire', ambele: '🔥❄️ Ambele' };
     const text = `
 🔔 *Cerere nouă — TermoDepozit*
-
-👤 *Nume:* ${payload.name}
-📞 *Telefon:* ${payload.phone}
+👤 *Nume:* ${name}
+📞 *Telefon:* ${phone}
 📧 *Email:* ${payload.email || '—'}
 📍 *Localitate:* ${payload.city || '—'}
 
-📊 *Calculator:*
-• Serviciu: ${serviciiLabel[serviciu]}
-• Tip: ${tip === 'apartament' ? 'Apartament' : 'Casă'}
-• Suprafață: ${area} m²
-• Izolație: ${izolatie}
-• Expunere solară: ${expunere}
-• Zonă: ${zona}
-${kwHeat ? '• ⚡ Încălzire: *' + kwHeat + ' kW*' : ''}
-${kwCool ? '• ❄️ Răcire: *' + kwCool + ' kW*' : ''}
+📊 *Calcul:* ${svcLabel[serviciu]}
+🏠 ${tip} · ${area} m² · ${izolatie} · ${expunere} · ${zona}
+⚡ Încălzire: *${kwHeat} kW* · Răcire: *${kwCool} kW*
 
-💬 *Mesaj:* ${payload.message || '—'}
-🕐 ${payload.sentAt}
-    `.trim();
+💬 ${payload.message || '—'}
+🕐 ${payload.sentAt}`.trim();
 
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    await fetch(\`https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: 'Markdown' }),
     });
     */
 
-    console.log('TermoDepozit — cerere nouă:', payload);
+    console.log('Cerere nouă:', payload);
 
     document.getElementById('offerForm').style.display   = 'none';
     document.getElementById('formSuccess').style.display = 'block';
-    const costEl = document.getElementById('costEstimates');
-    if (costEl) costEl.style.display = 'none';
+    document.getElementById('costBreakdown').style.display = 'none';
 }
 
 /* ===== RESET ===== */
@@ -479,42 +601,33 @@ function resetCalc() {
     Object.assign(state, {
         serviciu: null, tip: null, etaj: 'mijloc', etaje: '1',
         area: null, izolatie: null, expunere: null, zona: null,
-        kwHeat: null, kwCool: null,
+        kwHeat: null, kwCool: null, annualHeatKwh: 0, annualCoolKwh: 0,
     });
-
     document.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('selected'));
     document.querySelectorAll('.tag-btn').forEach(b => b.classList.remove('active'));
 
-    /* restore tag defaults */
-    [['sqApart','etaj','mijloc'],['sqHouse','etaje','1']].forEach(([id, f, v]) => {
-        const row = document.getElementById(id);
-        if (!row) return;
-        const def = row.querySelector(`.tag-btn[data-value="${v}"]`);
-        if (def) def.classList.add('active');
+    [['sqApart','etaj','mijloc'],['sqHouse','etaje','1']].forEach(([id,f,v]) => {
+        document.getElementById(id)?.querySelector(`.tag-btn[data-value="${v}"]`)?.classList.add('active');
     });
 
-    const areaInp = document.getElementById('areaInp');
-    if (areaInp) areaInp.value = '';
-
+    document.getElementById('areaInp').value = '';
     for (let i = 1; i <= 6; i++) {
-        const btn = document.getElementById('next' + i);
-        if (btn) btn.disabled = true;
+        const b = document.getElementById('next' + i);
+        if (b) b.disabled = true;
     }
-
     document.getElementById('offerForm').style.display   = 'block';
     document.getElementById('formSuccess').style.display = 'none';
+    document.getElementById('costBreakdown').innerHTML    = '';
     ['fName','fPhone','fCity','fEmail','fMsg'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    const costEl = document.getElementById('costEstimates');
-    if (costEl) costEl.remove();
-
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
     showStep('step1');
 }
 
 /* ===== SCROLL ANIMATIONS ===== */
-const observer = new IntersectionObserver(entries => {
+const io = new IntersectionObserver(entries => {
     entries.forEach(e => {
         if (e.isIntersecting) {
             e.target.style.opacity   = '1';
@@ -528,6 +641,6 @@ document.addEventListener('DOMContentLoaded', () => {
         el.style.opacity   = '0';
         el.style.transform = 'translateY(28px)';
         el.style.transition = `opacity .5s ease ${i * 0.06}s, transform .5s ease ${i * 0.06}s`;
-        observer.observe(el);
+        io.observe(el);
     });
 });
