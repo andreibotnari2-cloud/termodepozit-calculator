@@ -264,19 +264,9 @@ function renderResult() {
 function renderPipeCalc(area) {
     const MAX_LOOP = 100;
 
-    const spacings = [
-        { mm: 100, label: '10 cm', note: 'Baie / hol (densitate maximă)' },
-        { mm: 150, label: '15 cm', note: 'Standard rezidențial' },
-        { mm: 200, label: '20 cm', note: 'Camere bine izolate' },
-    ];
-
-    const rows = spacings.map(s => {
-        const L    = Math.round((area / (s.mm / 1000)) * 1.10);
-        const circ = Math.ceil(L / MAX_LOOP);
-        return { ...s, L, circ };
-    });
-
-    const rec = rows[1]; // 150mm recomandat
+    const L    = Math.round((area / 0.10) * 1.10);
+    const circ = Math.ceil(L / MAX_LOOP);
+    const rec  = { L, circ };
 
     let html = `
     <div class="pipe-section">
@@ -287,8 +277,8 @@ function renderPipeCalc(area) {
 
         <div class="pipe-rec-card">
             <div class="pipe-rec-header">
-                <span class="pipe-rec-badge">✓ Recomandat standard rezidențial</span>
-                <span class="pipe-rec-spacing">Pas 15 cm · PE-X 16×2mm</span>
+                <span class="pipe-rec-badge">✓ Standard — pas 10 cm</span>
+                <span class="pipe-rec-spacing">PE-X 16×2mm · max 100m/circuit</span>
             </div>
             <div class="pipe-rec-values">
                 <div class="pipe-rec-val">
@@ -306,29 +296,7 @@ function renderPipeCalc(area) {
             </div>
         </div>
 
-        <div class="pipe-table-wrap">
-            <table class="pipe-table">
-                <thead>
-                    <tr>
-                        <th>Pas țeavă</th>
-                        <th>Utilizare</th>
-                        <th>Lungime totală</th>
-                        <th>Circuite</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rows.map((r, i) => `
-                    <tr class="${i === 1 ? 'tr-rec' : ''}">
-                        <td><strong>${r.label}</strong></td>
-                        <td><span class="pipe-note">${r.note}</span></td>
-                        <td><strong>${r.L.toLocaleString('ro-MD')} m</strong></td>
-                        <td>${r.circ} × 100m</td>
-                    </tr>`).join('')}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="pipe-offer-box">
+<div class="pipe-offer-box">
             <div class="pipe-offer-text">
                 <strong>Vrei cel mai bun preț la țeavă PE-X din Moldova?</strong>
                 <span>Solicită oferta TermoDepozit — livrare rapidă, materiale certificate, montaj la cheie.</span>
