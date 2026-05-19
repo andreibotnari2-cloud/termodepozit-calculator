@@ -239,6 +239,13 @@ function renderResult() {
     document.getElementById('rcRecText').innerHTML =
         getRecommendation(kwHeat, kwCool, serviciu, state.category);
 
+    /* Pipe calc for underfloor heating */
+    if (state.category === 'podea') {
+        renderPipeCalc(area);
+    } else {
+        document.getElementById('pipeCalcSection').innerHTML = '';
+    }
+
     /* Cost breakdown + monthly chart */
     renderCostBreakdown(needHeat, needCool, annualHeatKwh, annualCoolKwh, zona, kwHeat, kwCool);
 
@@ -253,6 +260,107 @@ function renderResult() {
 }
 
 /* ===== COST BREAKDOWN + MONTHLY CHART ===== */
+/* ===== PIPE CALC — Podele calde ===== */
+function renderPipeCalc(area) {
+    /*
+      Standard EN 1264 / practică Moldova:
+      - Pas 150mm: camere living, dormitoare, standart rezidential
+      - Pas 200mm: camere bine izolate, consum redus
+      - Pas 100mm: baie, hol
+      - Teavă: PE-X/PE-RT 16x2mm (max bucla 100m), 20x2mm (max 120m)
+      - Formula: L = (area / pas_m) * 1.10  (+10% curbe si racorduri)
+      - Numar circuite = ceil(L / 100m)
+      - Pret teava 16x2mm: ~14 lei/m (medie MD)
+    */
+    const PIPE_PRICE = 14;   // lei/m — PE-X 16x2mm
+    const MAX_LOOP   = 100;  // m per bucla pentru 16mm
+
+    const spacings = [
+        { mm: 100, label: '10 cm',  note: 'Baie / hol (max densitate)',   factor: 'Căldură intensă' },
+        { mm: 150, label: '15 cm',  note: 'Standard rezidential',          factor: 'Recomandat' },
+        { mm: 200, label: '20 cm',  note: 'Camere bine izolate',           factor: 'Consum redus' },
+    ];
+
+    const rows = spacings.map(s => {
+        const L       = Math.round((area / (s.mm / 1000)) * 1.10);
+        const circ    = Math.ceil(L / MAX_LOOP);
+        const cost    = Math.round(L * PIPE_PRICE);
+        return { ...s, L, circ, cost };
+    });
+
+    /* Recommended = 150mm */
+    const rec = rows[1];
+
+    let html = `
+    <div class="pipe-section">
+        <div class="pipe-title">
+            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+            Calcul țeavă podea caldă — ${area} m²
+        </div>
+
+        <!-- Recommended highlight -->
+        <div class="pipe-rec-card">
+            <div class="pipe-rec-header">
+                <span class="pipe-rec-badge">✓ Recomandat standard rezidential</span>
+                <span class="pipe-rec-spacing">Pas 15 cm · PE-X 16×2mm</span>
+            </div>
+            <div class="pipe-rec-values">
+                <div class="pipe-rec-val">
+                    <span class="prv-num">${rec.L.toLocaleString('ro-MD')}</span>
+                    <span class="prv-unit">m țeavă</span>
+                </div>
+                <div class="pipe-rec-val">
+                    <span class="prv-num">${rec.circ}</span>
+                    <span class="prv-unit">${rec.circ === 1 ? 'circuit' : 'circuite'}</span>
+                </div>
+                <div class="pipe-rec-val">
+                    <span class="prv-num">1/${rec.circ}</span>
+                    <span class="prv-unit">distribuitor</span>
+                </div>
+                <div class="pipe-rec-val orange">
+                    <span class="prv-num">~${rec.cost.toLocaleString('ro-MD')}</span>
+                    <span class="prv-unit">lei țeavă</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison table -->
+        <div class="pipe-table-wrap">
+            <table class="pipe-table">
+                <thead>
+                    <tr>
+                        <th>Pas țeavă</th>
+                        <th>Utilizare</th>
+                        <th>Lungime totală</th>
+                        <th>Circuite</th>
+                        <th>Cost țeavă</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map((r, i) => `
+                    <tr class="${i === 1 ? 'tr-rec' : ''}">
+                        <td><strong>${r.label}</strong></td>
+                        <td><span class="pipe-note">${r.note}</span></td>
+                        <td><strong>${r.L.toLocaleString('ro-MD')} m</strong></td>
+                        <td>${r.circ} × 100m</td>
+                        <td><strong>~${r.cost.toLocaleString('ro-MD')} lei</strong></td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pipe-notes">
+            <div class="pipe-note-item">💡 <strong>Preț țeavă</strong>: ~14 lei/m PE-X 16×2mm. Prețul final variază cu marca și furnizorul.</div>
+            <div class="pipe-note-item">🔧 <strong>Distribuitor</strong>: colector cu ${rec.circ} ${rec.circ === 1 ? 'circuit' : 'circuite'} — robineți termostatici incluși în oferta noastră.</div>
+            <div class="pipe-note-item">🏗️ <strong>Șapă</strong>: min 5–7 cm peste țeavă (autonivelantă sau tradițională).</div>
+            <div class="pipe-note-item">📐 <strong>Notă</strong>: calculul e pentru ${area} m² suprafață totală cu o singură zonă. Dacă ai camere separate cu termostate independente, numărul de circuite poate crește.</div>
+        </div>
+    </div>`;
+
+    document.getElementById('pipeCalcSection').innerHTML = html;
+}
+
+
 function renderCostBreakdown(needHeat, needCool, heatKwh, coolKwh, zona, kwHeat, kwCool) {
     const tariffEl = zona === 'nord' ? TARIFF.electricNord : TARIFF.electricSud;
 
