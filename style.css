@@ -365,17 +365,13 @@ em { font-style: normal; color: var(--orange); }
 
 /* Monthly chart */
 .monthly-wrap { background: var(--white); border: 1.5px solid var(--border); border-radius: var(--r); overflow: hidden; box-shadow: var(--sh-sm); margin-bottom: 28px; }
-.monthly-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; border-bottom: 1.5px solid var(--border); background: var(--light); }
-.monthly-title { font-size: 14px; font-weight: 700; color: var(--dark); }
-.monthly-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.monthly-legend .legend-title { font-size: 12px; font-weight: 600; color: var(--mid); }
-.leg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.monthly-legend span:not(.leg-dot):not(.legend-title) { font-size: 12px; color: var(--mid); }
-.chart-container { padding: 20px; height: 260px; }
-.monthly-selector { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--light); }
-.sys-btn { padding: 7px 16px; border-radius: 50px; border: 1.5px solid var(--border); font-size: 12.5px; font-weight: 600; color: var(--mid); background: var(--white); transition: var(--t); cursor: pointer; }
+.monthly-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 20px; border-bottom: 1.5px solid var(--border); background: var(--light); }
+.monthly-title { font-size: 14px; font-weight: 700; color: var(--dark); white-space: nowrap; }
+.monthly-selector { display: flex; flex-wrap: wrap; gap: 7px; }
+.sys-btn { padding: 6px 14px; border-radius: 50px; border: 1.5px solid var(--border); font-size: 12px; font-weight: 600; color: var(--mid); background: var(--white); transition: var(--t); cursor: pointer; }
 .sys-btn:hover { border-color: var(--orange); color: var(--orange); }
 .sys-btn.active { background: var(--orange); border-color: var(--orange); color: var(--white); }
+.chart-container { padding: 20px 20px 8px; height: 280px; }
 
 /* ===== ADVANTAGES ===== */
 .advantages { padding: 100px 0; background: var(--white); }
@@ -462,7 +458,7 @@ em { font-style: normal; color: var(--orange); }
     .rc-kw-row.dual { grid-template-columns: 1fr; }
     .cost-annual-grid.dual { grid-template-columns: 1fr; }
     .cost-annual-grid.dual .cost-sys-card + .cost-sys-card { border-left: none; border-top: 1.5px solid var(--border); }
-    .chart-container { height: 220px; }
+    .chart-container { height: 230px; padding: 14px 12px 6px; }
     .kw-num { font-size: 48px; }
 
     .advantages { padding: 64px 0; }

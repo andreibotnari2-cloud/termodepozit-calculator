@@ -33,7 +33,8 @@ const MONTHLY_COOL_PCT = {
 
 const MONTHS_RO = ['Ian','Feb','Mar','Apr','Mai','Iun','Iul','Aug','Sep','Oct','Nov','Dec'];
 
-let chartInstance = null;
+let heatChart = null;
+let coolChart = null;
 
 /* ===== STATE ===== */
 const state = {
@@ -317,176 +318,148 @@ function renderCostBreakdown(needHeat, needCool, heatKwh, coolKwh, zona, kwHeat,
     html += `<p class="cost-note">Curent electric: ${tariffLabel} · Gaz: 14,42 lei/m³ · Lemn tare: ~1.000 lei/m³ster<br>Estimare bazată pe condiții climatice medii ale Republicii Moldova. Costurile reale pot varia ±15%.</p>`;
     html += `</div>`; // cost-annual
 
-    /* Monthly chart */
-    html += `<div class="monthly-wrap">
-        <div class="monthly-header">
-            <div class="monthly-title">📅 Distribuție lunară a costurilor (lei)</div>
-            <div class="monthly-legend" id="chartLegend"></div>
-        </div>
-        <div class="chart-container">
-            <canvas id="monthlyChart"></canvas>
-        </div>
-        <div class="monthly-selector" id="monthlySelector"></div>
-    </div>`;
+    /* Heating monthly chart */
+    if (needHeat) {
+        html += `
+        <div class="monthly-wrap">
+            <div class="monthly-header">
+                <div class="monthly-title">🔥 Cost lunar Încălzire (lei)</div>
+                <div class="monthly-selector" id="heatSelector"></div>
+            </div>
+            <div class="chart-container"><canvas id="monthlyHeatChart"></canvas></div>
+        </div>`;
+    }
+
+    /* Cooling monthly chart */
+    if (needCool) {
+        html += `
+        <div class="monthly-wrap">
+            <div class="monthly-header">
+                <div class="monthly-title">❄️ Cost lunar Răcire (lei)</div>
+                <div class="monthly-selector" id="coolSelector"></div>
+            </div>
+            <div class="chart-container"><canvas id="monthlyCoolChart"></canvas></div>
+        </div>`;
+    }
 
     html += `</div>`; // cost-wrap
 
     const container = document.getElementById('costBreakdown');
     container.innerHTML = html;
 
-    /* Build monthly chart datasets */
-    buildChart(needHeat, needCool, costs, zona, kwHeat, kwCool);
+    buildCharts(needHeat, needCool, costs, zona);
 }
 
-/* ===== CHART ===== */
-function buildChart(needHeat, needCool, costs, zona, kwHeat, kwCool) {
-    const tariffEl = zona === 'nord' ? TARIFF.electricNord : TARIFF.electricSud;
+/* ===== CHARTS — separate heating & cooling ===== */
+function buildCharts(needHeat, needCool, costs, zona) {
+    const heatPct = MONTHLY_HEAT_PCT[zona].map(p => p / 100);
+    const coolPct = MONTHLY_COOL_PCT[zona].map(p => p / 100);
 
-    /* System selector buttons */
-    const selWrap = document.getElementById('monthlySelector');
-    const systems = [];
     if (needHeat) {
-        systems.push({ id: 'hp',   label: '♻️ Pompă căldură', type: 'both' });
-        systems.push({ id: 'gaz',  label: '🔥 Cazan gaz',     type: 'heat' });
-        systems.push({ id: 'lemn', label: '🪵 Cazan lemn',     type: 'heat' });
-    }
-    if (needCool && !needHeat) {
-        systems.push({ id: 'hp_c',  label: '♻️ Pompă căldură', type: 'cool' });
-        systems.push({ id: 'ac_i',  label: '❄️ AC Inverter',   type: 'cool' });
-        systems.push({ id: 'ac_s',  label: '🌀 AC Standard',   type: 'cool' });
-    }
-
-    let activeSystem = systems[0]?.id || 'hp';
-
-    const heatMonthly = MONTHLY_HEAT_PCT[zona].map(p => p / 100);
-    const coolMonthly = MONTHLY_COOL_PCT[zona].map(p => p / 100);
-
-    function getDatasets(sysId) {
-        const ds = [];
-
-        /* Heat dataset */
-        if (needHeat) {
-            let annualH = 0;
-            if (sysId === 'hp')   annualH = costs.hpHeat;
-            if (sysId === 'gaz')  annualH = costs.gazHeat;
-            if (sysId === 'lemn') annualH = costs.lemnHeat;
-            if (annualH > 0) {
-                ds.push({
-                    label: '🔥 Încălzire',
-                    data: heatMonthly.map(p => Math.round(p * annualH)),
-                    backgroundColor: 'rgba(255, 107, 53, 0.85)',
-                    borderColor: '#FF6B35',
-                    borderWidth: 0,
-                    borderRadius: 6,
-                    borderSkipped: false,
-                });
-            }
-        }
-
-        /* Cool dataset */
-        if (needCool) {
-            let annualC = 0;
-            if (sysId === 'hp' || sysId === 'hp_c') annualC = costs.hpCool;
-            if (sysId === 'ac_i') annualC = costs.acInvCool;
-            if (sysId === 'ac_s') annualC = costs.acStdCool;
-            if (annualC > 0) {
-                ds.push({
-                    label: '❄️ Răcire',
-                    data: coolMonthly.map(p => Math.round(p * annualC)),
-                    backgroundColor: 'rgba(11, 197, 234, 0.80)',
-                    borderColor: '#0BC5EA',
-                    borderWidth: 0,
-                    borderRadius: 6,
-                    borderSkipped: false,
-                });
-            }
-        }
-        return ds;
+        const systems = [
+            { id: 'hp',   label: '\u267b\ufe0f Pomp\u0103 c\u0103ldur\u0103', annual: costs.hpHeat   },
+            { id: 'gaz',  label: '\uD83D\uDD25 Cazan gaz',     annual: costs.gazHeat  },
+            { id: 'lemn', label: '\uD83E\uDEB5 Cazan lemn',    annual: costs.lemnHeat },
+        ];
+        if (heatChart) { heatChart.destroy(); heatChart = null; }
+        heatChart = makeChart('monthlyHeatChart', 'heatSelector', systems, heatPct,
+            'rgba(255,107,53,0.88)', '#FF6B35',
+            (id) => { heatChart.data.datasets[0].data = calcData(systems, id, heatPct); heatChart.update(); });
     }
 
-    function renderLegend(sysId) {
-        const name = systems.find(s => s.id === sysId)?.label || '';
-        let html = `<span class="legend-title">${name}</span>`;
-        if (needHeat) html += `<span class="leg-dot" style="background:#FF6B35"></span><span>Încălzire</span>`;
-        if (needCool) html += `<span class="leg-dot" style="background:#0BC5EA"></span><span>Răcire</span>`;
-        document.getElementById('chartLegend').innerHTML = html;
+    if (needCool) {
+        const systems = [
+            { id: 'hp_c', label: '\u267b\ufe0f Pomp\u0103 c\u0103ldur\u0103', annual: costs.hpCool    },
+            { id: 'ac_i', label: '\u2744\ufe0f AC Inverter',   annual: costs.acInvCool },
+            { id: 'ac_s', label: '\uD83C\uDF00 AC Standard',   annual: costs.acStdCool },
+        ];
+        if (coolChart) { coolChart.destroy(); coolChart = null; }
+        coolChart = makeChart('monthlyCoolChart', 'coolSelector', systems, coolPct,
+            'rgba(11,197,234,0.85)', '#0BC5EA',
+            (id) => { coolChart.data.datasets[0].data = calcData(systems, id, coolPct); coolChart.update(); });
     }
+}
 
-    /* Selector buttons */
-    selWrap.innerHTML = systems.map(s =>
-        `<button class="sys-btn${s.id === activeSystem ? ' active' : ''}" onclick="switchChart('${s.id}')">${s.label}</button>`
-    ).join('');
+function calcData(systems, activeId, pct) {
+    const sys = systems.find(s => s.id === activeId) || systems[0];
+    return pct.map(p => Math.round(p * sys.annual));
+}
 
-    /* Make switchChart global */
-    window.switchChart = (sysId) => {
-        activeSystem = sysId;
-        selWrap.querySelectorAll('.sys-btn').forEach(b => {
-            b.classList.toggle('active', b.textContent.trim() === systems.find(s => s.id === sysId).label.trim());
+function makeChart(canvasId, selectorId, systems, pct, color, borderColor, onSwitch) {
+    let activeId = systems[0].id;
+    const sel = document.getElementById(selectorId);
+    if (sel) {
+        sel.innerHTML = systems.map(s =>
+            `<button class="sys-btn${s.id === activeId ? ' active' : ''}" data-sid="${s.id}">${s.label}</button>`
+        ).join('');
+        sel.addEventListener('click', e => {
+            const btn = e.target.closest('.sys-btn');
+            if (!btn) return;
+            activeId = btn.dataset.sid;
+            sel.querySelectorAll('.sys-btn').forEach(b => b.classList.toggle('active', b.dataset.sid === activeId));
+            onSwitch(activeId);
         });
-        /* easier: re-query by onclick */
-        selWrap.querySelectorAll('.sys-btn').forEach(b => {
-            const match = b.getAttribute('onclick')?.includes(`'${sysId}'`);
-            b.classList.toggle('active', !!match);
-        });
-        if (chartInstance) {
-            chartInstance.data.datasets = getDatasets(sysId);
-            chartInstance.update('active');
-        }
-        renderLegend(sysId);
-    };
+    }
 
-    /* Destroy old chart if exists */
-    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx) return null;
 
-    const ctx = document.getElementById('monthlyChart').getContext('2d');
-    chartInstance = new Chart(ctx, {
+    return new Chart(ctx, {
         type: 'bar',
         data: {
             labels: MONTHS_RO,
-            datasets: getDatasets(activeSystem),
+            datasets: [{
+                data: calcData(systems, activeId, pct),
+                backgroundColor: color,
+                borderColor,
+                borderWidth: 0,
+                borderRadius: 7,
+                borderSkipped: false,
+            }],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
+            layout: { padding: { top: 24 } },
             plugins: {
                 legend: { display: false },
+                datalabels: {
+                    anchor: 'end',
+                    align: 'end',
+                    offset: 2,
+                    formatter: v => v > 0 ? v.toLocaleString('ro-MD') : '',
+                    font: { size: 9.5, weight: '700' },
+                    color: '#2D3748',
+                    clamp: true,
+                },
                 tooltip: {
                     backgroundColor: '#1A202C',
                     titleColor: '#fff',
-                    bodyColor: 'rgba(255,255,255,.8)',
+                    bodyColor: 'rgba(255,255,255,.85)',
                     padding: 12,
                     cornerRadius: 10,
+                    displayColors: false,
                     callbacks: {
-                        label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('ro-MD')} lei`,
-                        footer: items => {
-                            const total = items.reduce((s, i) => s + i.parsed.y, 0);
-                            return total > 0 ? `Total: ${total.toLocaleString('ro-MD')} lei` : '';
-                        },
+                        label: ctx => ctx.parsed.y.toLocaleString('ro-MD') + ' lei',
                     },
                 },
             },
             scales: {
                 x: {
-                    stacked: true,
                     grid: { display: false },
-                    ticks: { font: { size: 12, weight: '600' }, color: '#4A5568' },
+                    ticks: { font: { size: 11, weight: '600' }, color: '#4A5568' },
                 },
                 y: {
-                    stacked: true,
-                    grid: { color: 'rgba(0,0,0,.06)', lineWidth: 1 },
+                    grid: { color: 'rgba(0,0,0,.05)', lineWidth: 1 },
                     border: { dash: [4, 4] },
-                    ticks: {
-                        font: { size: 11 }, color: '#718096',
-                        callback: v => v.toLocaleString('ro-MD') + ' lei',
-                    },
+                    ticks: { font: { size: 10 }, color: '#718096', callback: v => v.toLocaleString('ro-MD') },
                 },
             },
         },
+        plugins: [ChartDataLabels],
     });
-
-    renderLegend(activeSystem);
 }
+
 
 /* ===== RECOMMENDATION ===== */
 function getRecommendation(kwHeat, kwCool, serviciu, pref) {
@@ -622,7 +595,8 @@ function resetCalc() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    if (heatChart) { heatChart.destroy(); heatChart = null; }
+    if (coolChart) { coolChart.destroy(); coolChart = null; }
     showStep('step1');
 }
 
