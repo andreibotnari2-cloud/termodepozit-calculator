@@ -85,9 +85,30 @@ function goStep(from, to) {
     showStep(to === 'r' ? 'stepResult' : 'step' + to);
 }
 
+/* Serviciu predefinit per categorie */
+const CATEGORY_SERVICIU = {
+    gaz:   'incalzire',
+    lemn:  'incalzire',
+    podea: 'incalzire',
+    ac:    'racire',
+    pompa: 'ambele',
+    cheie: 'ambele',
+};
+
 function goToCalcWithCategory(cat) {
     state.category = cat;
+    const svc = CATEGORY_SERVICIU[cat] || null;
+    state.serviciu = svc;
+
     document.getElementById('calculator').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    if (svc) {
+        document.querySelectorAll('.choice-btn[data-field="serviciu"]').forEach(b => {
+            b.classList.toggle('selected', b.dataset.value === svc);
+        });
+        document.getElementById('next1').disabled = false;
+        setTimeout(() => showStep('step2'), 320);
+    }
 }
 
 /* ===== CHOICE CONTROLS ===== */
